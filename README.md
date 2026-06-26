@@ -11,6 +11,17 @@ Dataset scorers · LLM-as-judge · CI **ship gate** · lightweight tracing · pr
 
 ---
 
+## ⚡ Quick Start
+
+```bash
+git clone https://github.com/Arunops700/llm-eval-kit.git && cd llm-eval-kit
+uv sync --extra dev          # installs everything — no API keys needed
+uv run evalkit run           # the eval ship-gate (fails on a planted regression)
+```
+*Runs fully offline (FakeJudge).* Add `ANTHROPIC_API_KEY` to `.env` to enable the real LLM-as-judge.
+
+---
+
 ## Problem
 
 "The model feels good" isn't shippable. In 2026 the bar is a **ship gate**: a versioned eval set, a
