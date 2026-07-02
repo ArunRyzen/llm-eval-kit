@@ -14,11 +14,11 @@ Dataset scorers · LLM-as-judge · CI **ship gate** · lightweight tracing · pr
 ## ⚡ Quick Start
 
 ```bash
-git clone https://github.com/Arunops700/llm-eval-kit.git && cd llm-eval-kit
+git clone https://github.com/ArunRyzen/llm-eval-kit.git && cd llm-eval-kit
 uv sync --extra dev          # installs everything — no API keys needed
 uv run evalkit run           # the eval ship-gate (fails on a planted regression)
 ```
-*Runs fully offline (FakeJudge).* Add `ANTHROPIC_API_KEY` to `.env` to enable the real LLM-as-judge.
+*Runs fully offline (FakeJudge).* Add `GEMINI_API_KEY` to `.env` to enable the real LLM-as-judge.
 
 ---
 
@@ -74,18 +74,34 @@ Design rationale in [`docs/architecture.md`](docs/architecture.md).
 
 ## Tech stack
 
-`Python 3.12` · `Pydantic v2` · `Anthropic` (judge) · `FastAPI` · `Typer` · `uv` · `ruff` · `mypy`
-· `pytest` · `Docker` · `GitHub Actions`
+`Python 3.12` · `Pydantic v2` · `Gemini + Anthropic` (judge) · `FastAPI` · `Typer` · `uv` · `ruff`
+· `mypy` · `pytest` · `Docker` · `GitHub Actions`
 
 ## Setup
 
 ```bash
-git clone https://github.com/Arunops700/llm-eval-kit.git
+git clone https://github.com/ArunRyzen/llm-eval-kit.git
 cd llm-eval-kit
 uv sync --extra dev
 ```
-Runs fully offline. Add `ANTHROPIC_API_KEY` to enable the real `AnthropicJudge`; otherwise use the
-deterministic scorers and `FakeJudge`.
+Runs fully offline with the deterministic scorers and `FakeJudge` — no keys needed.
+
+### Live mode (real LLM-as-judge)
+
+The judge is picked automatically by `make_judge()` based on your environment:
+
+1. **Gemini (recommended, free tier available):** get a key at
+   [aistudio.google.com/apikey](https://aistudio.google.com/apikey), copy `.env.example` to `.env`,
+   and set `GEMINI_API_KEY` — this enables `GeminiJudge` (`gemini-2.5-flash`, structured JSON
+   verdicts via `response_schema`).
+2. **Claude (alternative):** set `ANTHROPIC_API_KEY` instead to use `AnthropicJudge`.
+3. **No key:** you get `FakeJudge`, and everything still works offline.
+
+```python
+from llm_eval_kit import EvalRunner, make_judge
+
+runner = EvalRunner([make_judge()], threshold=0.9)  # GeminiJudge if GEMINI_API_KEY is set
+```
 
 ## Usage
 
@@ -123,7 +139,8 @@ This kit is built to be the eval/guardrail layer for the earlier milestones:
 ```bash
 uv run ruff check . && uv run mypy . && uv run pytest
 ```
-25 tests, **fully offline** (FakeJudge + deterministic scorers). CI gates lint + types + tests.
+34 tests, **fully offline** (FakeJudge + a mocked Gemini client + deterministic scorers). CI gates
+lint + types + tests.
 
 ## Deployment
 ```bash
@@ -137,7 +154,9 @@ docker build -t llm-eval-kit . && docker run -p 8000:8000 --env-file .env llm-ev
 - Semantic-similarity scorer via embeddings.
 
 ## Learn more
+- **New to the codebase? Start with [`docs/code-walkthrough.md`](docs/code-walkthrough.md)** — a
+  plain-English, file-by-file tour with a suggested reading order.
 - [`docs/architecture.md`](docs/architecture.md) · [`docs/interview-questions.md`](docs/interview-questions.md) · [`docs/lessons-learned.md`](docs/lessons-learned.md)
 
 ## License
-[MIT](LICENSE) · Part of my [AI_Engineer](https://github.com/Arunops700/AI_Engineer) portfolio (Milestone 4).
+[MIT](LICENSE) · Part of my [AI_Engineer](https://github.com/ArunRyzen/AI_Engineer) portfolio (Milestone 4).

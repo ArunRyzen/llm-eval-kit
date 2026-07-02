@@ -7,6 +7,7 @@ Three capabilities, each usable on its own:
 - **Guardrails** — input/output filters for PII and prompt injection, plus output validation.
 """
 
+from llm_eval_kit.judge import AnthropicJudge, FakeJudge, GeminiJudge, make_judge
 from llm_eval_kit.models import CaseResult, Dataset, EvalCase, EvalReport, Score
 from llm_eval_kit.runner import EvalRunner, gate
 
@@ -20,5 +21,9 @@ __all__ = [
     "EvalReport",
     "EvalRunner",
     "gate",
+    "FakeJudge",
+    "GeminiJudge",
+    "AnthropicJudge",
+    "make_judge",
     "__version__",
 ]

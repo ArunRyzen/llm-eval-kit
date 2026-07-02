@@ -60,7 +60,11 @@ class EvalReport(BaseModel):
 
     @property
     def passed(self) -> bool:
-        """The ship gate: does the pass rate meet the threshold?"""
+        """The ship gate: does the pass rate meet the threshold?
+
+        THIS LINE is where pass/fail is decided for the whole run. Example: 3 of 4 cases pass
+        -> pass_rate 0.75 < threshold 0.80 -> the gate fails (and `gate()` fails the CI build).
+        """
         return self.pass_rate >= self.threshold
 
     def mean_by_scorer(self) -> dict[str, float]:
