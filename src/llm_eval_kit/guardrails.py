@@ -5,6 +5,10 @@ the defense is layered — filter the input, constrain and validate the output, 
 radius. These guards are pattern-based and deterministic (fast, testable, no model call); in
 production you'd pair them with a model-based classifier (Llama Guard / NeMo Guardrails) as a second
 layer. A `Guard` either **redacts** (transforms text) or **blocks** (flags a violation).
+
+In plain words: guards are checkpoints that text passes through on its way in to the model and on
+its way out. Some checkpoints clean the text (redact emails/phone numbers); others stop it entirely
+(a prompt-injection attempt, an over-long input, a banned word).
 """
 
 from __future__ import annotations
@@ -18,12 +22,16 @@ from llm_eval_kit.errors import GuardrailViolation
 
 @dataclass
 class GuardResult:
+    """What a guard hands back: the (possibly cleaned) text and what, if anything, it found."""
+
     text: str  # possibly redacted
-    violations: list[str] = field(default_factory=list)
-    blocked: bool = False
+    violations: list[str] = field(default_factory=list)  # human-readable "what was found"
+    blocked: bool = False  # True = do NOT let this text through
 
 
 class Guard(Protocol):
+    """The one interface every checkpoint implements: take text in, return a GuardResult."""
+
     name: str
 
     def apply(self, text: str) -> GuardResult: ...
@@ -31,6 +39,9 @@ class Guard(Protocol):
 
 # --- PII redaction -------------------------------------------------------------------
 
+# THE PII PATTERN LIST. Each entry maps a label (used in the "[REDACTED_...]" placeholder)
+# to a regex that recognizes that kind of personal data. To redact a NEW kind of PII
+# (e.g. IP addresses or passport numbers), add one entry here — nothing else changes.
 _PII_PATTERNS: dict[str, re.Pattern[str]] = {
     "EMAIL": re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b"),
     "PHONE": re.compile(r"\b(?:\+?\d{1,2}[ -]?)?(?:\(?\d{3}\)?[ -]?)\d{3}[ -]?\d{4}\b"),
@@ -40,7 +51,12 @@ _PII_PATTERNS: dict[str, re.Pattern[str]] = {
 
 
 class PiiRedactionGuard:
-    """Redacts emails, phone numbers, SSNs, and card-like numbers. Redacts, never blocks."""
+    """Redacts emails, phone numbers, SSNs, and card-like numbers. Redacts, never blocks.
+
+    Why redact instead of block? A message containing an email address is usually still a
+    legitimate message — we just don't want the PII reaching (or leaving) the model. So we
+    swap it for a placeholder and let the conversation continue.
+    """
 
     name = "pii_redaction"
 
@@ -50,12 +66,17 @@ class PiiRedactionGuard:
         for label, pattern in _PII_PATTERNS.items():
             if pattern.search(redacted):
                 found.append(label)
+                # Replace every match with a placeholder like "[REDACTED_EMAIL]".
                 redacted = pattern.sub(f"[REDACTED_{label}]", redacted)
         return GuardResult(text=redacted, violations=found, blocked=False)
 
 
 # --- Prompt-injection detection ------------------------------------------------------
 
+# THE PROMPT-INJECTION PATTERN LIST. Each regex is a known attack phrasing ("ignore all
+# previous instructions", "you are now...", "reveal your system prompt"). To catch a NEW
+# attack phrasing, append one `re.compile(...)` line here — the guard picks it up
+# automatically. `re.I` makes matching case-insensitive; `\s+` tolerates odd spacing.
 _INJECTION_PATTERNS: list[re.Pattern[str]] = [
     re.compile(r"ignore\s+(all\s+|the\s+)?(previous|above|prior)\s+(instructions|prompts)", re.I),
     re.compile(r"disregard\s+(the\s+)?(previous|above|system)", re.I),
@@ -68,17 +89,26 @@ _INJECTION_PATTERNS: list[re.Pattern[str]] = [
 
 
 class PromptInjectionGuard:
-    """Flags (blocks) text containing common prompt-injection phrasings."""
+    """Flags (blocks) text containing common prompt-injection phrasings.
+
+    Unlike PII (which we clean), injection attempts are hostile — we don't try to "fix" the
+    text, we refuse it. `violations` lists which patterns matched so you can see why.
+    """
 
     name = "prompt_injection"
 
     def apply(self, text: str) -> GuardResult:
+        # Collect every pattern that matches (not just the first) — better error messages.
         hits = [p.pattern for p in _INJECTION_PATTERNS if p.search(text)]
         return GuardResult(text=text, violations=hits, blocked=bool(hits))
 
 
 class LengthGuard:
-    """Blocks text over a character limit (a crude cost/abuse guard)."""
+    """Blocks text over a character limit (a crude cost/abuse guard).
+
+    Long inputs cost real money (tokens) and are a classic way to smuggle attacks or blow up
+    latency — so past the limit we simply say no.
+    """
 
     def __init__(self, max_chars: int) -> None:
         self.name = "length"
@@ -91,7 +121,10 @@ class LengthGuard:
 
 
 class BannedContentGuard:
-    """Blocks output containing any banned term (case-insensitive)."""
+    """Blocks output containing any banned term (case-insensitive).
+
+    A last-line output filter: whatever the model says, these words never reach the user.
+    """
 
     def __init__(self, terms: list[str]) -> None:
         self.name = "banned_content"
@@ -107,7 +140,11 @@ class BannedContentGuard:
 
 
 class GuardrailPipeline:
-    """Runs input guards before the model and output guards after, carrying redactions forward."""
+    """Runs input guards before the model and output guards after, carrying redactions forward.
+
+    Think of it as two rows of checkpoints: one row between the user and the model
+    (`guard_input`), one row between the model and the user (`guard_output`).
+    """
 
     def __init__(
         self, input_guards: list[Guard] | None = None, output_guards: list[Guard] | None = None
@@ -117,6 +154,8 @@ class GuardrailPipeline:
 
     @staticmethod
     def _run(guards: list[Guard], text: str) -> GuardResult:
+        # Run the guards IN ORDER, feeding each one the previous guard's (possibly cleaned)
+        # text. One combined result comes out: all violations, blocked if ANY guard blocked.
         violations: list[str] = []
         blocked = False
         for guard in guards:
@@ -128,6 +167,7 @@ class GuardrailPipeline:
 
     def guard_input(self, text: str, *, raise_on_block: bool = True) -> GuardResult:
         result = self._run(self._input, text)
+        # By default a block raises — callers can't accidentally ignore a hostile input.
         if result.blocked and raise_on_block:
             raise GuardrailViolation(f"Input blocked: {result.violations}", guard="input")
         return result
