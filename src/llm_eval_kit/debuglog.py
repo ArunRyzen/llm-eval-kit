@@ -55,7 +55,7 @@ def _dotenv_llm_debug() -> str:
     """
     # python-dotenv is already here as a pydantic-settings dependency — no new install needed.
     # dotenv_values quietly returns {} when the file doesn't exist.
-    return dotenv_values(".env").get("LLM_DEBUG") or ""
+    return dotenv_values(".env", encoding="utf-8-sig").get("LLM_DEBUG") or ""
 
 
 def debug_enabled() -> bool:
