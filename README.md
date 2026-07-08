@@ -110,10 +110,20 @@ judge call prints the full judge prompt (rubric + question + candidate answer) a
 verdict to **stderr**. It works fully offline too — `FakeJudge` logs the same blocks, so you can
 study the mechanics without an API key. API keys are never logged; long fields are truncated.
 
+Two ways to switch it on:
+
 ```powershell
-$env:LLM_DEBUG="1"; uv run evalkit run     # watch every judge request/response
-Remove-Item Env:LLM_DEBUG                  # back to silence
+$env:LLM_DEBUG="1"; uv run evalkit run     # 1) env var: watch every judge request/response
+Remove-Item Env:LLM_DEBUG                  #    back to silence
 ```
+
+```dotenv
+# 2) or put it in your project's .env file (read from the current directory):
+LLM_DEBUG=1
+```
+
+Precedence: a real `LLM_DEBUG` environment variable, when set, always beats `.env` — so
+`$env:LLM_DEBUG="0"` silences a run even if your `.env` says `LLM_DEBUG=1`.
 
 ```
 === AI REQUEST (judge: gemini/gemini-2.5-flash) ===
