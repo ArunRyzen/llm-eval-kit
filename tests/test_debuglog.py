@@ -1,24 +1,35 @@
 """LLM_DEBUG is a learning aid: silent by default, verbose on stderr when switched on.
 
-These tests run fully offline via FakeJudge — no API key, no network. They prove three things:
+These tests run fully offline via FakeJudge — no API key, no network. They prove four things:
 the kit is silent when LLM_DEBUG is unset (or falsy), it prints request/response blocks to
-stderr when set, and it never floods the terminal (long fields are truncated).
+stderr when set, it never floods the terminal (long fields are truncated), and a project
+``.env`` file can switch it on — with the real environment variable always taking precedence.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from llm_eval_kit.debuglog import debug_enabled, log_block
+from llm_eval_kit.debuglog import _dotenv_llm_debug, debug_enabled, log_block
 from llm_eval_kit.judge import FakeJudge
 from llm_eval_kit.models import EvalCase
 
 _CASE = EvalCase(id="t", input="Capital of France?", reference="Paris")
 
+
+def _isolate(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Run the test from an empty temp dir so the developer's real .env can't leak in."""
+    monkeypatch.chdir(tmp_path)
+    _dotenv_llm_debug.cache_clear()
+
+
 # --- the on/off switch ------------------------------------------------------------------
 
 
-def test_debug_disabled_when_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_debug_disabled_when_unset(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    _isolate(monkeypatch, tmp_path)  # no .env here — and no env var below
     monkeypatch.delenv("LLM_DEBUG", raising=False)
     assert not debug_enabled()
 
@@ -35,12 +46,54 @@ def test_debug_enabled_for_truthy_values(monkeypatch: pytest.MonkeyPatch, value:
     assert debug_enabled()
 
 
+# --- the .env fallback ------------------------------------------------------------------
+
+
+def test_dotenv_file_enables_debug(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("LLM_DEBUG=1\n", encoding="utf-8")
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.delenv("LLM_DEBUG", raising=False)  # no env var → .env decides
+    assert debug_enabled()
+
+
+def test_env_var_beats_dotenv(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("LLM_DEBUG=1\n", encoding="utf-8")
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("LLM_DEBUG", "0")  # env var is set → it wins, .env is ignored
+    assert not debug_enabled()
+
+
+def test_env_var_beats_dotenv_in_the_other_direction(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".env").write_text("LLM_DEBUG=0\n", encoding="utf-8")
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.setenv("LLM_DEBUG", "1")
+    assert debug_enabled()
+
+
+def test_falsy_dotenv_value_stays_off(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("LLM_DEBUG=false\n", encoding="utf-8")
+    _isolate(monkeypatch, tmp_path)
+    monkeypatch.delenv("LLM_DEBUG", raising=False)
+    assert not debug_enabled()
+
+
+def test_neither_env_var_nor_dotenv_means_off(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    _isolate(monkeypatch, tmp_path)  # empty dir: no .env at all
+    monkeypatch.delenv("LLM_DEBUG", raising=False)
+    assert not debug_enabled()
+
+
 # --- silence by default -----------------------------------------------------------------
 
 
 def test_judge_is_silent_when_debug_unset(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tmp_path: Path
 ) -> None:
+    _isolate(monkeypatch, tmp_path)
     monkeypatch.delenv("LLM_DEBUG", raising=False)
     FakeJudge().score("Paris.", _CASE)
     captured = capsys.readouterr()

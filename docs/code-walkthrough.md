@@ -198,7 +198,9 @@ judge's `score()` calls it twice: once with the full judge prompt before the cal
 (`=== AI REQUEST (judge: ...) ===`) and once with the parsed verdict after
 (`=== AI RESPONSE (judge) ===`). `FakeJudge` logs too, so `LLM_DEBUG=1 pytest` or an offline
 `evalkit run` shows you real judge traffic for free. API keys are never logged, and any field
-over ~2000 characters is cut with `... [truncated]`.
+over ~2000 characters is cut with `... [truncated]`. `debug_enabled()` also honours a
+`LLM_DEBUG=1` line in the project's `.env` file (read via `python-dotenv` and cached), but a
+real environment variable — when set — always takes precedence over `.env`.
 
 ## 6. `guardrails.py` — checkpoints on the way in and out
 
