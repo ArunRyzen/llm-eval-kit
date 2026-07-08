@@ -15,6 +15,7 @@ purpose; you can read the whole library in an afternoon.
 | **The PII patterns** (email/phone/SSN/card) | `src/llm_eval_kit/guardrails.py` | `_PII_PATTERNS` — a dict of label → regex; add an entry to redact a new PII type |
 | **Where spans open and close in the tracer** | `src/llm_eval_kit/tracing.py` | `Tracer.span()` — opens before `yield`, closes in `finally` |
 | The judge selection (Gemini vs Claude vs Fake) | `src/llm_eval_kit/judge.py` | `make_judge()` |
+| **The `LLM_DEBUG` switch** (print judge prompts + verdicts to stderr) | `src/llm_eval_kit/debuglog.py` | `debug_enabled()` and `log_block()`; call sites in `judge.py` |
 | Each scorer (exact / contains / regex / Jaccard / JSON) | `src/llm_eval_kit/scorers.py` | one class per scorer |
 | The shared Scorer interface | `src/llm_eval_kit/scorers.py` | `class Scorer(Protocol)` |
 | Environment / `.env` settings | `src/llm_eval_kit/config.py` | `Settings` |
@@ -187,6 +188,17 @@ return FakeJudge()                                          # offline fallback
 
 Set `GEMINI_API_KEY` in `.env` and `make_judge()` gives you a live Gemini judge; unset everything
 and you're safely offline.
+
+### Watching a judge think — `debuglog.py` and `LLM_DEBUG`
+
+`debuglog.py` is a ~50-line learning aid: `debug_enabled()` checks the `LLM_DEBUG` environment
+variable (unset, `0`, or `false` mean off), and `log_block()` prints a framed plain-ASCII block to
+**stderr** — stderr so debug chatter never corrupts stdout, which CI and pipes consume. Every
+judge's `score()` calls it twice: once with the full judge prompt before the call
+(`=== AI REQUEST (judge: ...) ===`) and once with the parsed verdict after
+(`=== AI RESPONSE (judge) ===`). `FakeJudge` logs too, so `LLM_DEBUG=1 pytest` or an offline
+`evalkit run` shows you real judge traffic for free. API keys are never logged, and any field
+over ~2000 characters is cut with `... [truncated]`.
 
 ## 6. `guardrails.py` — checkpoints on the way in and out
 
