@@ -15,6 +15,7 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from llm_eval_kit.config import Settings, load_settings
+from llm_eval_kit.debuglog import log_block
 from llm_eval_kit.errors import JudgeError
 from llm_eval_kit.models import EvalCase, Score
 from llm_eval_kit.scorers import Scorer
@@ -45,27 +46,8 @@ def _clamp(value: float) -> float:
     return max(0.0, min(1.0, value))
 
 
-class FakeJudge:
-    """A deterministic judge for tests/offline demos. Optionally returns a fixed score.
-
-    Why fake it? Real judges cost money, need network + API keys, and can answer differently
-    each run — all poison for a test suite. FakeJudge has the *same interface and shape of
-    output* as the real judges, so tests prove the plumbing works without ever calling an API.
-    """
-
-    name = "llm_judge"
-
-    def __init__(self, fixed: float | None = None) -> None:
-        self._fixed = fixed
-
-    def score(self, output: str, case: EvalCase) -> Score:
-        # Rule: use the fixed score if one was given; otherwise pass any non-empty answer.
-        value = self._fixed if self._fixed is not None else (1.0 if output.strip() else 0.0)
-        return Score(scorer=self.name, value=value, passed=value >= 0.5, detail="fake judge")
-
-
 class _PromptMixin:
-    """Shared prompt building: every real judge shows the model the same rubric + evidence."""
+    """Shared prompt building: every judge (fake or real) shows the same rubric + evidence."""
 
     _criteria: str
 
@@ -81,6 +63,31 @@ class _PromptMixin:
             parts.append(f"\nReference answer:\n{case.reference}")
         parts.append("\nReturn a score in [0,1], a pass/fail, and one-sentence reasoning.")
         return "\n".join(parts)
+
+
+class FakeJudge(_PromptMixin):
+    """A deterministic judge for tests/offline demos. Optionally returns a fixed score.
+
+    Why fake it? Real judges cost money, need network + API keys, and can answer differently
+    each run — all poison for a test suite. FakeJudge has the *same interface and shape of
+    output* as the real judges, so tests prove the plumbing works without ever calling an API.
+    It even builds the same prompt, so `LLM_DEBUG=1` shows you real judge traffic offline.
+    """
+
+    name = "llm_judge"
+    _criteria = "overall correctness, faithfulness, and helpfulness"
+
+    def __init__(self, fixed: float | None = None) -> None:
+        self._fixed = fixed
+
+    def score(self, output: str, case: EvalCase) -> Score:
+        # With LLM_DEBUG=1, show the prompt a real judge *would* send — free, offline.
+        log_block("AI REQUEST (judge: offline fake judge)", judge_prompt=self._prompt(output, case))
+        # Rule: use the fixed score if one was given; otherwise pass any non-empty answer.
+        value = self._fixed if self._fixed is not None else (1.0 if output.strip() else 0.0)
+        result = Score(scorer=self.name, value=value, passed=value >= 0.5, detail="fake judge")
+        log_block("AI RESPONSE (judge)", verdict=result.model_dump_json())
+        return result
 
 
 class GeminiJudge(_PromptMixin):
@@ -111,10 +118,13 @@ class GeminiJudge(_PromptMixin):
         from google import genai
         from google.genai import errors, types
 
+        prompt = self._prompt(output, case)
+        # LLM_DEBUG=1 prints exactly what the judge model is about to see (never the API key).
+        log_block(f"AI REQUEST (judge: gemini/{self._model})", judge_prompt=prompt)
         try:
             response = genai.Client(api_key=self._api_key).models.generate_content(
                 model=self._model,
-                contents=self._prompt(output, case),
+                contents=prompt,
                 config=types.GenerateContentConfig(
                     system_instruction=_JUDGE_SYSTEM,
                     max_output_tokens=self._max_tokens,
@@ -133,6 +143,7 @@ class GeminiJudge(_PromptMixin):
             if not response.text:
                 raise JudgeError("Judge returned no structured verdict.")
             verdict = _Verdict.model_validate_json(response.text)
+        log_block("AI RESPONSE (judge)", verdict=verdict.model_dump_json())
         return Score(
             scorer=self.name,
             value=_clamp(verdict.score),
@@ -164,12 +175,15 @@ class AnthropicJudge(_PromptMixin):
         # never touch the SDK.
         import anthropic
 
+        prompt = self._prompt(output, case)
+        # LLM_DEBUG=1 prints exactly what the judge model is about to see (never the API key).
+        log_block(f"AI REQUEST (judge: anthropic/{self._model})", judge_prompt=prompt)
         try:
             response = anthropic.Anthropic(api_key=self._api_key).messages.parse(
                 model=self._model,
                 max_tokens=self._max_tokens,
                 system=_JUDGE_SYSTEM,
-                messages=[{"role": "user", "content": self._prompt(output, case)}],
+                messages=[{"role": "user", "content": prompt}],
                 output_format=_Verdict,  # same trick: the reply must match our verdict schema
             )
         except anthropic.APIError as exc:
@@ -178,6 +192,7 @@ class AnthropicJudge(_PromptMixin):
         verdict = response.parsed_output
         if verdict is None:
             raise JudgeError("Judge returned no structured verdict.")
+        log_block("AI RESPONSE (judge)", verdict=verdict.model_dump_json())
         return Score(
             scorer=self.name,
             value=_clamp(verdict.score),

@@ -103,6 +103,27 @@ from llm_eval_kit import EvalRunner, make_judge
 runner = EvalRunner([make_judge()], threshold=0.9)  # GeminiJudge if GEMINI_API_KEY is set
 ```
 
+### Peek behind the curtain (`LLM_DEBUG`)
+
+Want to *see* exactly what the LLM-as-judge sends and gets back? Set `LLM_DEBUG=1` and every
+judge call prints the full judge prompt (rubric + question + candidate answer) and the parsed
+verdict to **stderr**. It works fully offline too — `FakeJudge` logs the same blocks, so you can
+study the mechanics without an API key. API keys are never logged; long fields are truncated.
+
+```powershell
+$env:LLM_DEBUG="1"; uv run evalkit run     # watch every judge request/response
+Remove-Item Env:LLM_DEBUG                  # back to silence
+```
+
+```
+=== AI REQUEST (judge: gemini/gemini-2.5-flash) ===
+judge prompt: Rubric: rate the answer on overall correctness, faithfulness, and helpfulness. ...
+===================================================
+=== AI RESPONSE (judge) ===
+verdict: {"score":0.9,"passed":true,"reasoning":"Accurate and concise."}
+===========================
+```
+
 ## Usage
 
 **As a library** (the point — drop it into any project):
